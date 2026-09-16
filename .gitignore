@@ -1,8 +1,8 @@
 node_modules/
+.tools/
 .env
 downloads/
 tmp/
 *.log
 .DS_Store
 Thumbs.db
-

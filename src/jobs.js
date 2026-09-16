@@ -42,6 +42,9 @@ export class JobManager {
       await fs.mkdir(job.directory, { recursive: true });
       const outputTemplate = path.join(job.directory, '%(title).120B.%(ext)s');
       const spec = job.provider.buildDownload({ ...job.metadata, ...job.selection, outputPath: job.outputPath, outputTemplate });
+      if (spec.preflight) {
+        await run(spec.preflight.command, spec.preflight.args, { timeoutMs: 10_000 });
+      }
       await run(spec.command, spec.args, { timeoutMs: 30 * 60_000 });
       if (job.provider.id === 'ytdlp' || job.provider.id === 'generic') {
         const files = await fs.readdir(job.directory);

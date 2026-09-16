@@ -9,54 +9,66 @@
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="/" aria-label="ClipPort 홈"><span class="brand-mark" aria-hidden="true"><span></span></span><span>ClipPort</span></a>
+    <a class="brand" href="/"><span class="brand-mark"><i></i></span>ClipPort</a>
     <span class="internal"><i></i>Company internal</span>
   </header>
+
   <main>
     <section class="hero">
       <p class="eyebrow">PUBLIC MEDIA, READY TO USE</p>
       <h1>영상 주소 하나로<br><em>필요한 화질까지.</em></h1>
-      <p class="description">공개 영상 URL을 붙여넣으면 제목, 썸네일과 사이트에서 실제 제공하는 화질을 확인합니다.</p>
+      <p class="description">공개 영상 URL을 붙여넣으면 실제 제공 화질을 확인하고 MP4로 다운로드할 수 있습니다.</p>
       <form id="analyze-form" class="url-form">
         <label class="sr-only" for="media-url">영상 URL</label>
         <div class="url-input">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.6 13.4a3 3 0 0 0 4.2 0l3-3a3 3 0 0 0-4.2-4.2l-1.7 1.7M13.4 10.6a3 3 0 0 0-4.2 0l-3 3a3 3 0 0 0 4.2 4.2l1.7-1.7"/></svg>
-          <input id="media-url" type="url" inputmode="url" autocomplete="url" placeholder="YouTube 등 공개 영상 URL을 붙여넣으세요" required>
+          <span aria-hidden="true">↗</span>
+          <input id="media-url" type="url" autocomplete="url" placeholder="YouTube 공개 영상 URL을 붙여넣으세요" required>
           <button id="paste-button" class="paste" type="button">붙여넣기</button>
         </div>
-        <button id="analyze-button" class="primary" type="submit"><span>영상 분석</span><span aria-hidden="true">→</span></button>
+        <button id="analyze-button" class="primary" type="submit"><span>영상 분석</span><span>→</span></button>
       </form>
       <p class="scope">공개적으로 재생 가능하거나 회사가 이용 권한을 가진 콘텐츠만 사용하세요.</p>
     </section>
+
     <section id="status" class="status hidden" aria-live="polite">
       <span class="spinner" aria-hidden="true"></span>
       <div><strong id="status-title"></strong><p id="status-message"></p></div>
     </section>
+
     <section id="result" class="result hidden" aria-live="polite">
       <div id="thumbnail-wrap" class="thumbnail-wrap"><img id="thumbnail" alt="영상 썸네일"></div>
       <div class="result-body">
         <span id="provider" class="provider"></span>
         <h2 id="title"></h2>
         <p id="duration" class="duration"></p>
-        <div class="format-heading"><h3>제공 화질</h3><span id="format-count"></span></div>
-        <div id="formats" class="formats"></div>
-        <p class="next-note">다운로드와 MP3 추출은 다음 구현 단계에서 연결됩니다.</p>
+        <div class="format-heading"><h3>다운로드 화질</h3><span id="format-count"></span></div>
+        <label class="sr-only" for="quality-select">다운로드 화질</label>
+        <select id="quality-select" class="quality-select"></select>
+        <p id="format-help" class="format-help"></p>
+        <button id="download-button" class="download-button" type="button" disabled>MP4 다운로드</button>
+        <p id="download-status" class="download-status" aria-live="polite"></p>
       </div>
     </section>
-    <section class="principles" aria-label="서비스 원칙">
+
+    <section class="principles">
       <article><span>01</span><h3>실제 제공 화질</h3><p>사이트가 제공하지 않는 화질을 인위적으로 만들지 않습니다.</p></article>
-      <article><span>02</span><h3>브라우저만으로</h3><p>영상 분석과 변환 도구는 서버에서 처리하는 구조입니다.</p></article>
+      <article><span>02</span><h3>원본 품질 우선</h3><p>가능하면 재인코딩 없이 원본 영상과 음성을 MP4로 준비합니다.</p></article>
       <article><span>03</span><h3>권리와 접근 보호</h3><p>DRM, 로그인, 인증 또는 유료 콘텐츠 접근을 우회하지 않습니다.</p></article>
     </section>
   </main>
+
   <dialog id="login-dialog">
     <form id="login-form">
-      <p class="eyebrow">COMPANY ACCESS</p><h2>사내 접근 키</h2><p>승인된 구성원만 사용할 수 있습니다.</p>
-      <label for="access-key">접근 키</label><input id="access-key" type="password" autocomplete="current-password" required>
+      <p class="eyebrow">COMPANY ACCESS</p>
+      <h2>사내 접근 키</h2>
+      <p>승인된 구성원만 사용할 수 있습니다.</p>
+      <label for="access-key">접근 키</label>
+      <input id="access-key" type="password" autocomplete="current-password" required>
       <p id="login-error" class="login-error" role="alert"></p>
       <button class="primary login-button" type="submit">접속하기 <span>→</span></button>
     </form>
   </dialog>
+
   <footer>ClipPort · 회사 내부 사용 전용</footer>
   <script type="module" src="/app.js"></script>
 </body>
