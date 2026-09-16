@@ -8,6 +8,7 @@ import electron from 'electron';
 import { createAuth } from '../src/auth.js';
 
 const { app, BrowserWindow, dialog, ipcMain } = electron;
+app.setName('Btv ClipPort');
 
 const projectRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const approvedSavePaths = new Set();
@@ -27,7 +28,7 @@ app.on('second-instance', () => {
 });
 
 app.whenReady().then(startDesktopApp).catch(error => {
-  dialog.showErrorBox('ClipPort 시작 오류', error.message || String(error));
+  dialog.showErrorBox('Btv ClipPort 시작 오류', error.message || String(error));
   app.quit();
 });
 
@@ -156,7 +157,7 @@ function assertTrustedSender(event) {
 }
 
 function safeFilename(value, extension) {
-  const base = path.basename(String(value || `ClipPort.${extension}`))
+  const base = path.basename(String(value || `Btv ClipPort.${extension}`))
     .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
     .replace(/[. ]+$/g, '')
     .slice(0, 180);
@@ -178,7 +179,7 @@ async function runSmokeTest() {
       const waitFor = async (predicate, timeout = 180000) => {
         const started = Date.now();
         while (Date.now() - started < timeout) {
-          const value = predicate();
+          const value = await predicate();
           if (value) return value;
           await new Promise(resolve => setTimeout(resolve, 250));
         }
@@ -187,26 +188,95 @@ async function runSmokeTest() {
       document.querySelector('#media-url').value = 'https://www.youtube.com/watch?v=jNQXAC9IVRw';
       document.querySelector('#analyze-form').requestSubmit();
       await waitFor(() => !document.querySelector('#result').classList.contains('hidden'));
+      const qualityLabels = [...document.querySelector('#quality-select').options].map(option => option.textContent.split(' · ')[0]);
       const analyzed = {
         title: document.querySelector('#title').textContent,
         duration: document.querySelector('#duration').textContent,
         formats: document.querySelector('#quality-select').options.length,
-        thumbnail: Boolean(document.querySelector('#thumbnail').src)
+        thumbnail: Boolean(document.querySelector('#thumbnail').src),
+        uniqueResolutions: new Set(qualityLabels).size === qualityLabels.length,
+        brand: document.querySelector('.brand').textContent.trim(),
+        creator: document.querySelector('footer small').textContent.trim()
       };
       const mergeOption = [...document.querySelector('#quality-select').options].find(option => option.dataset.requiresFfmpeg === 'true');
       if (!mergeOption) throw new Error('FFmpeg merge format not found');
       document.querySelector('#quality-select').value = mergeOption.value;
+      let resetWarning = '';
+      const originalAlert = window.alert;
+      window.alert = message => { resetWarning = String(message); };
       document.querySelector('#download-button').click();
+      await waitFor(() => document.querySelector('#download-button').disabled);
+      document.querySelector('#reset-button').click();
+      const resetBlockedDuringDownload = resetWarning.includes('다운로드가 진행 중')
+        && !document.querySelector('#result').classList.contains('hidden');
+      window.alert = originalAlert;
       await waitFor(() => document.querySelector('#download-status').textContent.includes('저장했습니다.'), 300000);
       const videoStatus = document.querySelector('#download-status').textContent;
       document.querySelector('[data-mode="audio"]').click();
       document.querySelector('#download-button').click();
       await waitFor(() => document.querySelector('#download-status').textContent !== videoStatus);
       await waitFor(() => document.querySelector('#download-status').textContent.includes('저장했습니다.'), 300000);
+      const audioStatus = document.querySelector('#download-status').textContent;
+
+      const codecMediaResponse = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: 'https://www.youtube.com/watch?v=jNQXAC9IVRw' })
+      });
+      const codecMedia = await codecMediaResponse.json();
+      const downloadCodec = async (id, codec, ext) => {
+        const metadata = {
+          ...codecMedia,
+          title: 'Codec ' + codec,
+          formats: [{
+            id, label: '240p', height: 240, ext, hasAudio: false,
+            codec: codec.toLowerCase(), requiresFfmpeg: true
+          }]
+        };
+        const response = await fetch('/api/downloads', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ metadata, mode: 'video', formatId: id })
+        });
+        const created = await response.json();
+        if (!response.ok) throw new Error(created.message);
+        const ready = await waitFor(async () => {
+          const statusResponse = await fetch('/api/downloads/' + created.id);
+          const job = await statusResponse.json();
+          if (job.status === 'failed') throw new Error(job.error);
+          return job.status === 'ready' ? job : null;
+        }, 300000);
+        const savePath = await window.clipPortDesktop.chooseSavePath({
+          suggestedName: 'Codec ' + codec + '.mp4', extension: 'mp4'
+        });
+        if (savePath.canceled) throw new Error('Codec test save canceled');
+        await window.clipPortDesktop.saveDownload({ jobId: ready.id, filePath: savePath.filePath });
+        return true;
+      };
+      const av1 = await downloadCodec('395', 'AV1', 'mp4');
+      const vp9 = await downloadCodec('242', 'VP9', 'webm');
+
+      document.querySelector('#reset-button').click();
+      const resetState = {
+        urlCleared: document.querySelector('#media-url').value === '',
+        resultHidden: document.querySelector('#result').classList.contains('hidden'),
+        formatsCleared: document.querySelector('#quality-select').options.length === 0,
+        videoMode: document.querySelector('[data-mode="video"]').classList.contains('active'),
+        messageCleared: document.querySelector('#download-status').textContent === ''
+      };
+      document.querySelector('#media-url').value = 'https://www.youtube.com/watch?v=M7lc1UVf-VE';
+      document.querySelector('#analyze-form').requestSubmit();
+      await waitFor(() => !document.querySelector('#result').classList.contains('hidden')
+        && document.querySelector('#title').textContent !== analyzed.title);
       return {
         ...analyzed,
         videoStatus,
-        audioStatus: document.querySelector('#download-status').textContent
+        audioStatus,
+        resetBlockedDuringDownload,
+        av1,
+        vp9,
+        resetState,
+        secondTitle: document.querySelector('#title').textContent
       };
     })()
   `, true);

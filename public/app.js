@@ -6,8 +6,10 @@ const qualitySelect = document.querySelector('#quality-select');
 const status = document.querySelector('#status');
 const result = document.querySelector('#result');
 const loginDialog = document.querySelector('#login-dialog');
+const resetButton = document.querySelector('#reset-button');
 let currentMedia = null;
 let outputMode = 'video';
+let downloadInProgress = false;
 
 initialize();
 
@@ -61,12 +63,21 @@ document.querySelectorAll('[data-mode]').forEach(button => {
   button.addEventListener('click', () => setOutputMode(button.dataset.mode));
 });
 
+resetButton.addEventListener('click', () => {
+  if (downloadInProgress) {
+    window.alert('다운로드가 진행 중입니다. 완료된 뒤 새 영상을 시작해 주세요.');
+    return;
+  }
+  resetApp();
+});
+
 downloadButton.addEventListener('click', async () => {
   if (!currentMedia || (outputMode === 'video' && !qualitySelect.value)) return;
+  const requestedMode = outputMode;
   try {
     let desktopSavePath = null;
     if (window.clipPortDesktop?.isDesktop) {
-      const extension = outputMode === 'audio' ? 'mp3' : 'mp4';
+      const extension = requestedMode === 'audio' ? 'mp3' : 'mp4';
       const selection = await window.clipPortDesktop.chooseSavePath({
         suggestedName: `${currentMedia.title}.${extension}`,
         extension
@@ -77,33 +88,38 @@ downloadButton.addEventListener('click', async () => {
       }
       desktopSavePath = selection.filePath;
     }
-    setDownloadState(true, `${outputMode === 'audio' ? 'MP3' : 'MP4'} 파일을 준비하고 있습니다.`);
+    downloadInProgress = true;
+    setInteractionLock(true);
+    setDownloadState(true, `${requestedMode === 'audio' ? 'MP3' : 'MP4'} 파일을 준비하고 있습니다.`, false, requestedMode);
     const job = await request('/api/downloads', {
       method: 'POST',
       body: {
         metadata: currentMedia,
-        mode: outputMode,
-        formatId: outputMode === 'video' ? qualitySelect.value : null
+        mode: requestedMode,
+        formatId: requestedMode === 'video' ? qualitySelect.value : null
       }
     });
-    await waitForDownload(job.id, desktopSavePath);
+    await waitForDownload(job.id, desktopSavePath, requestedMode);
   } catch (error) {
-    setDownloadState(false, friendlyDownloadError(error.message), true);
+    setDownloadState(false, friendlyDownloadError(error.message, requestedMode), true, requestedMode);
+  } finally {
+    downloadInProgress = false;
+    setInteractionLock(false);
   }
 });
 
-async function waitForDownload(jobId, desktopSavePath = null) {
+async function waitForDownload(jobId, desktopSavePath = null, requestedMode = outputMode) {
   for (;;) {
     await delay(1000);
     const job = await request(`/api/downloads/${jobId}`);
     if (job.status === 'failed') throw new Error(job.error || '영상 다운로드에 실패했습니다.');
     if (job.status === 'ready') {
-      const extension = outputMode === 'audio' ? 'MP3' : 'MP4';
+      const extension = requestedMode === 'audio' ? 'MP3' : 'MP4';
       if (window.clipPortDesktop?.isDesktop && desktopSavePath) {
         await window.clipPortDesktop.saveDownload({ jobId, filePath: desktopSavePath });
-        setDownloadState(false, `${extension} 파일을 선택한 위치에 저장했습니다.`);
+        setDownloadState(false, `${extension} 파일을 선택한 위치에 저장했습니다.`, false, requestedMode);
       } else {
-        setDownloadState(false, `${extension} 파일이 준비되었습니다. 다운로드를 시작합니다.`);
+        setDownloadState(false, `${extension} 파일이 준비되었습니다. 다운로드를 시작합니다.`, false, requestedMode);
         window.location.assign(`/api/downloads/${jobId}/file`);
       }
       return;
@@ -111,7 +127,7 @@ async function waitForDownload(jobId, desktopSavePath = null) {
     const progress = Number.isFinite(job.progress) ? ` ${job.progress}%` : '';
     setDownloadState(true, job.status === 'queued'
       ? '작업 순서를 기다리고 있습니다.'
-      : outputMode === 'audio'
+      : requestedMode === 'audio'
         ? `오디오를 내려받고 MP3로 변환하고 있습니다.${progress}`
         : `영상을 다운로드하고 MP4 파일을 준비하고 있습니다.${progress}`);
   }
@@ -146,6 +162,7 @@ function renderResult(media) {
     const option = document.createElement('option');
     option.value = format.id;
     option.dataset.requiresFfmpeg = String(format.requiresFfmpeg);
+    option.title = format.details || '';
     option.textContent = `${format.label}${format.filesize ? ` · ${formatBytes(format.filesize)}` : ''}`;
     return option;
   }));
@@ -163,7 +180,7 @@ function updateFormatHelp() {
   }
   const selected = currentMedia?.formats.find(format => String(format.id) === qualitySelect.value);
   document.querySelector('#format-help').textContent = selected?.requiresFfmpeg
-    ? '이 화질은 영상과 음성 병합을 위해 서버에 FFmpeg가 필요합니다.'
+    ? '영상과 호환성 높은 오디오를 병합해 MP4로 준비합니다.'
     : '영상과 음성이 포함된 MP4 원본을 그대로 다운로드합니다.';
 }
 
@@ -186,9 +203,9 @@ function setAnalyzing(loading) {
   analyzeButton.firstElementChild.textContent = loading ? '분석 중' : '영상 분석';
 }
 
-function setDownloadState(loading, message, isError = false) {
+function setDownloadState(loading, message, isError = false, mode = outputMode) {
   downloadButton.disabled = loading;
-  const extension = outputMode === 'audio' ? 'MP3' : 'MP4';
+  const extension = mode === 'audio' ? 'MP3' : 'MP4';
   downloadButton.textContent = loading ? `${extension} 준비 중…` : `${extension} 다운로드`;
   const element = document.querySelector('#download-status');
   element.textContent = message;
@@ -209,14 +226,44 @@ function showError(message) {
   document.querySelector('#status-message').textContent = message;
 }
 
-function friendlyDownloadError(message) {
+function friendlyDownloadError(message, mode = outputMode) {
   if (/ffmpeg/i.test(message)) {
-    return outputMode === 'audio'
-      ? 'MP3 추출에 필요한 서버 FFmpeg를 사용할 수 없습니다. 관리자에게 문의하세요.'
-      : '선택한 화질은 영상과 음성 병합이 필요합니다. 서버 FFmpeg 상태를 확인하세요.';
+    return mode === 'audio'
+      ? 'MP3 추출에 필요한 FFmpeg를 사용할 수 없습니다.'
+      : '영상과 음성을 병합하지 못했습니다. 앱을 다시 실행한 뒤 시도해 주세요.';
   }
   if (/unavailable|not available/i.test(message)) return '현재 이 영상을 다운로드할 수 없습니다. 공개 상태인지 확인하세요.';
-  return message || `${outputMode === 'audio' ? 'MP3' : 'MP4'} 파일을 준비하지 못했습니다.`;
+  return message || `${mode === 'audio' ? 'MP3' : 'MP4'} 파일을 준비하지 못했습니다.`;
+}
+
+function setInteractionLock(locked) {
+  qualitySelect.disabled = locked;
+  document.querySelectorAll('[data-mode]').forEach(button => { button.disabled = locked; });
+}
+
+function resetApp() {
+  currentMedia = null;
+  form.reset();
+  setOutputMode('video');
+  result.classList.add('hidden');
+  status.classList.add('hidden');
+  status.classList.remove('error');
+  document.querySelector('#status-title').textContent = '';
+  document.querySelector('#status-message').textContent = '';
+  document.querySelector('#thumbnail').removeAttribute('src');
+  document.querySelector('#thumbnail-wrap').classList.add('hidden');
+  document.querySelector('#provider').textContent = '';
+  document.querySelector('#title').textContent = '';
+  document.querySelector('#duration').textContent = '';
+  document.querySelector('#format-count').textContent = '';
+  document.querySelector('#format-help').textContent = '';
+  document.querySelector('#download-status').textContent = '';
+  document.querySelector('#download-status').classList.remove('error');
+  qualitySelect.replaceChildren();
+  qualitySelect.disabled = false;
+  downloadButton.disabled = true;
+  urlInput.focus();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function formatDuration(seconds) {

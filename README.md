@@ -1,4 +1,4 @@
-# ClipPort
+# Btv ClipPort
 
 사내 구성원이 공개 영상 URL을 분석하고 실제 제공 화질의 MP4 또는 MP3를 저장하는
 Windows/macOS용 Electron 데스크톱 앱입니다.

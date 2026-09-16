@@ -118,7 +118,7 @@ function setSecurityHeaders(res) {
 
 server.listen(config.port, config.host, () => {
   const address = server.address();
-  console.log(`Company Media Downloader: http://${config.host}:${address.port}`);
+  console.log(`Btv ClipPort: http://${config.host}:${address.port}`);
   if (!auth.enabled) console.warn('APP_ACCESS_KEY가 없어 개발 모드에서 인증 없이 실행됩니다.');
 });
 

@@ -1,5 +1,5 @@
 appId: com.company.clipport
-productName: ClipPort
+productName: Btv ClipPort
 asar: true
 npmRebuild: false
 directories:

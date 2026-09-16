@@ -15,30 +15,15 @@ export class YtDlpProvider extends MediaProvider {
     let info;
     try { info = JSON.parse(stdout); } catch { throw new AppError('사이트의 영상 정보를 해석하지 못했습니다.', 422, 'INVALID_METADATA'); }
     if (info.is_live) throw new AppError('라이브 방송은 현재 지원하지 않습니다.', 422, 'LIVE_NOT_SUPPORTED');
-    const formats = (info.formats || [])
-      .filter(item => item.vcodec && item.vcodec !== 'none' && item.format_id)
-      .map(item => ({
-        id: String(item.format_id),
-        label: formatLabel(item),
-        height: item.height || null,
-        ext: item.ext || 'mp4',
-        filesize: item.filesize || item.filesize_approx || null,
-        hasAudio: Boolean(item.acodec && item.acodec !== 'none'),
-        requiresFfmpeg: !item.acodec || item.acodec === 'none' || item.ext !== 'mp4'
-      }))
-      .sort((a, b) => (b.height || 0) - (a.height || 0));
-    const unique = [...new Map(formats.map(item => [
-      `${item.height}-${item.ext}-${item.hasAudio ? 'video-audio' : 'video-only'}`,
-      item
-    ])).values()];
-    if (!unique.length) throw new AppError('다운로드 가능한 영상 화질을 찾지 못했습니다.', 422, 'NO_FORMATS');
+    const formats = selectPreferredFormats(info.formats || []);
+    if (!formats.length) throw new AppError('다운로드 가능한 영상 화질을 찾지 못했습니다.', 422, 'NO_FORMATS');
     return {
       provider: this.id,
       title: normalizeTitle(info.title),
       thumbnail: info.thumbnail || null,
       duration: info.duration || null,
       sourceUrl: url.href,
-      formats: unique,
+      formats,
       audioAvailable: true
     };
   }
@@ -63,7 +48,13 @@ export class YtDlpProvider extends MediaProvider {
     const selected = formats.find(item => String(item.id) === String(formatId));
     if (!selected) throw new AppError('선택한 화질 정보를 찾을 수 없습니다.', 400, 'FORMAT_NOT_FOUND');
     const needsMerge = !selected.hasAudio || selected.ext !== 'mp4';
-    const selection = selected.hasAudio ? String(formatId) : `${formatId}+bestaudio/best`;
+    const selection = selected.hasAudio
+      ? String(formatId)
+      : [
+        `${formatId}+bestaudio[ext=m4a]`,
+        `${formatId}+bestaudio[acodec^=mp4a]`,
+        `${formatId}+bestaudio`
+      ].join('/');
     const ffmpegLocation = needsMerge && this.config.ffmpegPath !== 'ffmpeg'
       ? ['--ffmpeg-location', this.config.ffmpegPath]
       : [];
@@ -77,10 +68,51 @@ export class YtDlpProvider extends MediaProvider {
   }
 }
 
-function formatLabel(item) {
-  const quality = item.height ? `${item.height}p` : item.format_note || '영상';
-  const fps = item.fps && item.fps > 30 ? ` · ${Math.round(item.fps)}fps` : '';
-  const codec = item.vcodec ? ` · ${String(item.vcodec).split('.')[0]}` : '';
-  const audio = item.acodec && item.acodec !== 'none' ? ' · 영상+음성' : ' · 영상 전용';
-  return `${quality}${fps}${codec}${audio}`;
+export function selectPreferredFormats(sourceFormats) {
+  const candidates = sourceFormats
+    .filter(item => item.vcodec && item.vcodec !== 'none' && item.format_id && item.height)
+    .map(item => {
+      const hasAudio = Boolean(item.acodec && item.acodec !== 'none');
+      const codec = codecFamily(item.vcodec);
+      return {
+        id: String(item.format_id),
+        label: `${item.height}p`,
+        details: `${codec.label} · ${String(item.ext || 'mp4').toUpperCase()}${hasAudio ? ' · 영상+음성' : ' · 영상 전용'}`,
+        height: item.height,
+        ext: item.ext || 'mp4',
+        filesize: item.filesize || item.filesize_approx || null,
+        hasAudio,
+        vcodec: item.vcodec,
+        codec: codec.id,
+        fps: item.fps || null,
+        bitrate: item.tbr || item.vbr || 0,
+        requiresFfmpeg: !hasAudio || item.ext !== 'mp4'
+      };
+    });
+
+  const byHeight = new Map();
+  for (const format of candidates) {
+    const current = byHeight.get(format.height);
+    if (!current || compareCompatibility(format, current) < 0) byHeight.set(format.height, format);
+  }
+  return [...byHeight.values()].sort((a, b) => b.height - a.height);
+}
+
+function compareCompatibility(left, right) {
+  return codecRank(left.codec) - codecRank(right.codec)
+    || Number(right.ext === 'mp4') - Number(left.ext === 'mp4')
+    || Number(right.hasAudio) - Number(left.hasAudio)
+    || (right.bitrate || 0) - (left.bitrate || 0);
+}
+
+function codecFamily(value) {
+  const codec = String(value).toLowerCase();
+  if (/^(avc1|avc3|h264)/.test(codec)) return { id: 'h264', label: 'H.264' };
+  if (/^(vp0?9)/.test(codec)) return { id: 'vp9', label: 'VP9' };
+  if (/^(av01|av1)/.test(codec)) return { id: 'av1', label: 'AV1' };
+  return { id: 'other', label: String(value).split('.')[0].toUpperCase() };
+}
+
+function codecRank(codec) {
+  return { h264: 0, vp9: 1, av1: 2, other: 3 }[codec] ?? 4;
 }

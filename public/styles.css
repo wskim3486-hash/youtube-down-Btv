@@ -11,6 +11,9 @@ button { cursor: pointer; }
 .brand { display: flex; align-items: center; gap: 10px; color: inherit; text-decoration: none; font-weight: 800; }
 .brand-mark { width: 27px; height: 27px; border-radius: 8px; display: grid; place-items: center; background: #172a20; transform: rotate(-5deg); }
 .brand-mark i { width: 9px; height: 9px; border-radius: 2px; background: #b9ed40; }
+.top-actions { display: flex; align-items: center; gap: 8px; }
+.reset-button { padding: 8px 12px; border: 1px solid #d9e1d8; border-radius: 999px; color: #68736b; background: #ffffffa6; font-size: 11px; font-weight: 700; }
+.reset-button:hover { color: #17211b; border-color: #bdc8bc; }
 .internal { padding: 8px 12px; border: 1px solid #d9e1d8; border-radius: 999px; background: #ffffffa6; color: #68736b; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
 .internal i { display: inline-block; width: 6px; height: 6px; margin-right: 7px; border-radius: 50%; background: #7fae16; }
 main { max-width: 1080px; margin: auto; padding: 65px 28px 100px; }
@@ -58,7 +61,8 @@ h1 em { color: #739b10; font-style: normal; }
 .principles span { color: #71980e; font: 700 11px ui-monospace, monospace; }
 .principles h3 { margin: 14px 0 8px; font-size: 15px; }
 .principles p { margin: 0; color: #707b73; font-size: 13px; line-height: 1.65; }
-footer { max-width: 1024px; margin: auto; padding: 24px 28px 35px; border-top: 1px solid #d8dfd7; color: #858e87; font-size: 11px; }
+footer { max-width: 1024px; margin: auto; padding: 24px 28px 35px; border-top: 1px solid #d8dfd7; color: #858e87; font-size: 11px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+footer small { color: #a0a8a2; font-size: 9px; }
 .hidden { display: none !important; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 dialog { width: min(410px, calc(100% - 28px)); padding: 0; border: 1px solid #d8dfd7; border-radius: 21px; }
@@ -71,6 +75,7 @@ dialog input { padding: 13px; border: 1px solid #d9e1d8; border-radius: 10px; }
 @media (max-width: 700px) {
   .topbar { padding: 0 18px; }
   .internal { font-size: 0; }
+  .top-actions { gap: 5px; }
   main { padding: 40px 17px 75px; }
   .url-form { grid-template-columns: 1fr; }
   .url-form .primary { min-height: 51px; }
@@ -79,4 +84,5 @@ dialog input { padding: 13px; border: 1px solid #d9e1d8; border-radius: 10px; }
   .thumbnail-wrap { min-height: auto; aspect-ratio: 16/9; }
   .principles { grid-template-columns: 1fr; margin-top: 65px; }
   .principles article { border-right: 0; border-bottom: 1px solid #d8dfd7; }
+  footer { align-items: flex-start; flex-direction: column; gap: 5px; }
 }

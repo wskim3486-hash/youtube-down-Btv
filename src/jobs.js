@@ -61,11 +61,15 @@ export class JobManager {
       });
       if (job.provider.id === 'ytdlp' || job.provider.id === 'generic') {
         const files = await fs.readdir(job.directory);
-        const result = files.find(name => name.toLowerCase().endsWith(`.${spec.extension}`));
+        const expectedName = `${safeBaseName}.${spec.extension}`;
+        const result = files.includes(expectedName)
+          ? expectedName
+          : files.find(name => name.toLowerCase().endsWith(`.${spec.extension}`) && !/\.f\d+\./i.test(name));
         if (!result) throw new AppError('변환된 파일을 찾지 못했습니다.', 500, 'OUTPUT_MISSING');
         job.outputPath = path.join(job.directory, result);
         job.filename = result;
       }
+      if (job.selection.mode === 'video') await verifyVideoOutput(this.config.ffprobePath, job.outputPath);
       job.status = 'ready';
       job.progress = 100;
       job.readyAt = Date.now();
@@ -93,5 +97,23 @@ export function publicJob(job) {
 function updateProgress(job, chunk) {
   for (const match of String(chunk).matchAll(/PROGRESS:\s*([0-9]+(?:\.[0-9]+)?)%/g)) {
     job.progress = Math.max(0, Math.min(100, Math.round(Number(match[1]))));
+  }
+}
+
+async function verifyVideoOutput(ffprobePath, outputPath) {
+  const { stdout } = await run(ffprobePath, [
+    '-v', 'error', '-show_entries', 'format=format_name',
+    '-show_entries', 'stream=codec_type,codec_name', '-of', 'json', outputPath
+  ], { timeoutMs: 30_000 });
+  let probe;
+  try { probe = JSON.parse(stdout); } catch {
+    throw new AppError('완성된 MP4 파일을 검사하지 못했습니다.', 500, 'INVALID_MP4_PROBE');
+  }
+  const streams = Array.isArray(probe.streams) ? probe.streams : [];
+  const hasVideo = streams.some(stream => stream.codec_type === 'video');
+  const hasAudio = streams.some(stream => stream.codec_type === 'audio');
+  const isMp4 = String(probe.format?.format_name || '').split(',').some(name => name === 'mp4' || name === 'mov');
+  if (!hasVideo || !hasAudio || !isMp4) {
+    throw new AppError('완성된 MP4에 영상과 오디오가 모두 포함되지 않았습니다.', 500, 'INVALID_MP4_STREAMS');
   }
 }
