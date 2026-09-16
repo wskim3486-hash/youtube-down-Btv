@@ -14,7 +14,7 @@ initialize();
 async function initialize() {
   try {
     const health = await request('/api/health');
-    if (health.authRequired) loginDialog.showModal();
+    if (health.authRequired && !window.clipPortDesktop?.isDesktop) loginDialog.showModal();
   } catch (error) {
     showError(error.message);
   }
@@ -63,8 +63,21 @@ document.querySelectorAll('[data-mode]').forEach(button => {
 
 downloadButton.addEventListener('click', async () => {
   if (!currentMedia || (outputMode === 'video' && !qualitySelect.value)) return;
-  setDownloadState(true, `${outputMode === 'audio' ? 'MP3' : 'MP4'} 파일을 준비하고 있습니다.`);
   try {
+    let desktopSavePath = null;
+    if (window.clipPortDesktop?.isDesktop) {
+      const extension = outputMode === 'audio' ? 'mp3' : 'mp4';
+      const selection = await window.clipPortDesktop.chooseSavePath({
+        suggestedName: `${currentMedia.title}.${extension}`,
+        extension
+      });
+      if (selection.canceled) {
+        setDownloadState(false, '저장이 취소되었습니다.');
+        return;
+      }
+      desktopSavePath = selection.filePath;
+    }
+    setDownloadState(true, `${outputMode === 'audio' ? 'MP3' : 'MP4'} 파일을 준비하고 있습니다.`);
     const job = await request('/api/downloads', {
       method: 'POST',
       body: {
@@ -73,26 +86,34 @@ downloadButton.addEventListener('click', async () => {
         formatId: outputMode === 'video' ? qualitySelect.value : null
       }
     });
-    await waitForDownload(job.id);
+    await waitForDownload(job.id, desktopSavePath);
   } catch (error) {
     setDownloadState(false, friendlyDownloadError(error.message), true);
   }
 });
 
-async function waitForDownload(jobId) {
+async function waitForDownload(jobId, desktopSavePath = null) {
   for (;;) {
     await delay(1000);
     const job = await request(`/api/downloads/${jobId}`);
     if (job.status === 'failed') throw new Error(job.error || '영상 다운로드에 실패했습니다.');
     if (job.status === 'ready') {
       const extension = outputMode === 'audio' ? 'MP3' : 'MP4';
-      setDownloadState(false, `${extension} 파일이 준비되었습니다. 다운로드를 시작합니다.`);
-      window.location.assign(`/api/downloads/${jobId}/file`);
+      if (window.clipPortDesktop?.isDesktop && desktopSavePath) {
+        await window.clipPortDesktop.saveDownload({ jobId, filePath: desktopSavePath });
+        setDownloadState(false, `${extension} 파일을 선택한 위치에 저장했습니다.`);
+      } else {
+        setDownloadState(false, `${extension} 파일이 준비되었습니다. 다운로드를 시작합니다.`);
+        window.location.assign(`/api/downloads/${jobId}/file`);
+      }
       return;
     }
+    const progress = Number.isFinite(job.progress) ? ` ${job.progress}%` : '';
     setDownloadState(true, job.status === 'queued'
       ? '작업 순서를 기다리고 있습니다.'
-      : outputMode === 'audio' ? '오디오를 추출하고 MP3로 변환하고 있습니다.' : '영상을 다운로드하고 MP4 파일을 준비하고 있습니다.');
+      : outputMode === 'audio'
+        ? `오디오를 내려받고 MP3로 변환하고 있습니다.${progress}`
+        : `영상을 다운로드하고 MP4 파일을 준비하고 있습니다.${progress}`);
   }
 }
 
@@ -124,6 +145,7 @@ function renderResult(media) {
   qualitySelect.replaceChildren(...media.formats.map(format => {
     const option = document.createElement('option');
     option.value = format.id;
+    option.dataset.requiresFfmpeg = String(format.requiresFfmpeg);
     option.textContent = `${format.label}${format.filesize ? ` · ${formatBytes(format.filesize)}` : ''}`;
     return option;
   }));

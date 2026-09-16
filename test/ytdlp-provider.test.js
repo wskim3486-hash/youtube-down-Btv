@@ -14,6 +14,7 @@ test('영상과 음성이 포함된 MP4는 FFmpeg 없이 원본 포맷을 선택
   });
   assert.equal(spec.args.includes('--ffmpeg-location'), false);
   assert.equal(spec.args[spec.args.indexOf('-f') + 1], '18');
+  assert.equal(spec.args[spec.args.indexOf('--progress-template') + 1], 'download:PROGRESS:%(progress._percent_str)s');
 });
 
 test('영상 전용 포맷은 최고 오디오와 FFmpeg 병합을 요청한다', () => {
@@ -38,6 +39,7 @@ test('MP3 추출은 FFmpeg 사전검사와 최고 품질 VBR 변환을 요청한
   assert.equal(spec.extension, 'mp3');
   assert.deepEqual(spec.preflight, { command: 'ffmpeg', args: ['-version'] });
   assert.equal(spec.args.includes('-x'), true);
+  assert.equal(spec.args.includes('--progress-template'), true);
   assert.equal(spec.args[spec.args.indexOf('--audio-format') + 1], 'mp3');
   assert.equal(spec.args[spec.args.indexOf('--audio-quality') + 1], '0');
 });

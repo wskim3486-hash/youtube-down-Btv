@@ -28,6 +28,13 @@ export class JobManager {
 
   get(id) { const job = this.jobs.get(id); if (!job) throw new AppError('작업을 찾을 수 없습니다.', 404, 'JOB_NOT_FOUND'); return job; }
 
+  async remove(id) {
+    const job = this.get(id);
+    if (job.status === 'processing') throw new AppError('진행 중인 작업은 정리할 수 없습니다.', 409, 'JOB_PROCESSING');
+    await fs.rm(job.directory, { recursive: true, force: true });
+    this.jobs.delete(id);
+  }
+
   async drain() {
     while (this.running < this.config.maxConcurrent && this.queue.length) {
       const job = this.queue.shift();
@@ -39,6 +46,7 @@ export class JobManager {
   async execute(job) {
     try {
       job.status = 'processing';
+      job.progress = 0;
       await fs.mkdir(job.directory, { recursive: true });
       const safeBaseName = path.parse(job.filename).name;
       const outputTemplate = path.join(job.directory, `${safeBaseName}.%(ext)s`);
@@ -46,7 +54,11 @@ export class JobManager {
       if (spec.preflight) {
         await run(spec.preflight.command, spec.preflight.args, { timeoutMs: 10_000 });
       }
-      await run(spec.command, spec.args, { timeoutMs: 30 * 60_000 });
+      await run(spec.command, spec.args, {
+        timeoutMs: 30 * 60_000,
+        onStdout: chunk => updateProgress(job, chunk),
+        onStderr: chunk => updateProgress(job, chunk)
+      });
       if (job.provider.id === 'ytdlp' || job.provider.id === 'generic') {
         const files = await fs.readdir(job.directory);
         const result = files.find(name => name.toLowerCase().endsWith(`.${spec.extension}`));
@@ -55,6 +67,7 @@ export class JobManager {
         job.filename = result;
       }
       job.status = 'ready';
+      job.progress = 100;
       job.readyAt = Date.now();
     } catch (error) {
       job.status = 'failed';
@@ -74,5 +87,11 @@ export class JobManager {
 }
 
 export function publicJob(job) {
-  return { id: job.id, status: job.status, filename: job.status === 'ready' ? job.filename : null, error: job.error };
+  return { id: job.id, status: job.status, progress: job.progress, filename: job.status === 'ready' ? job.filename : null, error: job.error };
+}
+
+function updateProgress(job, chunk) {
+  for (const match of String(chunk).matchAll(/PROGRESS:\s*([0-9]+(?:\.[0-9]+)?)%/g)) {
+    job.progress = Math.max(0, Math.min(100, Math.round(Number(match[1]))));
+  }
 }

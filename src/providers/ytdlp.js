@@ -44,7 +44,10 @@ export class YtDlpProvider extends MediaProvider {
   }
 
   buildDownload({ sourceUrl, formatId, mode, outputTemplate, formats = [] }) {
-    const common = ['--no-playlist', '--no-call-home', '--no-part', '--newline'];
+    const common = [
+      '--no-playlist', '--no-call-home', '--no-part', '--newline',
+      '--progress-template', 'download:PROGRESS:%(progress._percent_str)s'
+    ];
     if (mode === 'audio') {
       const ffmpegLocation = this.config.ffmpegPath !== 'ffmpeg'
         ? ['--ffmpeg-location', this.config.ffmpegPath]

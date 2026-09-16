@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { AppError } from './errors.js';
 
-export function run(command, args, { timeoutMs = 60_000, signal } = {}) {
+export function run(command, args, { timeoutMs = 60_000, signal, onStdout, onStderr } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], signal });
     let stdout = '';
@@ -13,8 +13,8 @@ export function run(command, args, { timeoutMs = 60_000, signal } = {}) {
 
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
-    child.stdout.on('data', chunk => { stdout += chunk; });
-    child.stderr.on('data', chunk => { stderr += chunk; });
+    child.stdout.on('data', chunk => { stdout += chunk; onStdout?.(chunk); });
+    child.stderr.on('data', chunk => { stderr += chunk; onStderr?.(chunk); });
     child.once('error', error => {
       clearTimeout(timer);
       const missing = error.code === 'ENOENT';
