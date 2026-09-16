@@ -40,7 +40,8 @@ export class JobManager {
     try {
       job.status = 'processing';
       await fs.mkdir(job.directory, { recursive: true });
-      const outputTemplate = path.join(job.directory, '%(title).120B.%(ext)s');
+      const safeBaseName = path.parse(job.filename).name;
+      const outputTemplate = path.join(job.directory, `${safeBaseName}.%(ext)s`);
       const spec = job.provider.buildDownload({ ...job.metadata, ...job.selection, outputPath: job.outputPath, outputTemplate });
       if (spec.preflight) {
         await run(spec.preflight.command, spec.preflight.args, { timeoutMs: 10_000 });

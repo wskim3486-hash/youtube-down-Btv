@@ -28,3 +28,16 @@ test('영상 전용 포맷은 최고 오디오와 FFmpeg 병합을 요청한다'
   assert.equal(spec.args[spec.args.indexOf('-f') + 1], '401+bestaudio/best');
   assert.equal(spec.args.includes('--merge-output-format'), true);
 });
+
+test('MP3 추출은 FFmpeg 사전검사와 최고 품질 VBR 변환을 요청한다', () => {
+  const spec = provider.buildDownload({
+    sourceUrl: 'https://www.youtube.com/watch?v=example',
+    mode: 'audio',
+    outputTemplate: 'safe-title.%(ext)s'
+  });
+  assert.equal(spec.extension, 'mp3');
+  assert.deepEqual(spec.preflight, { command: 'ffmpeg', args: ['-version'] });
+  assert.equal(spec.args.includes('-x'), true);
+  assert.equal(spec.args[spec.args.indexOf('--audio-format') + 1], 'mp3');
+  assert.equal(spec.args[spec.args.indexOf('--audio-quality') + 1], '0');
+});

@@ -46,7 +46,15 @@ export class YtDlpProvider extends MediaProvider {
   buildDownload({ sourceUrl, formatId, mode, outputTemplate, formats = [] }) {
     const common = ['--no-playlist', '--no-call-home', '--no-part', '--newline'];
     if (mode === 'audio') {
-      return { command: this.config.ytdlpPath, args: [...common, '-x', '--audio-format', 'mp3', '--audio-quality', '0', '-o', outputTemplate, '--', sourceUrl], extension: 'mp3' };
+      const ffmpegLocation = this.config.ffmpegPath !== 'ffmpeg'
+        ? ['--ffmpeg-location', this.config.ffmpegPath]
+        : [];
+      return {
+        command: this.config.ytdlpPath,
+        args: [...common, ...ffmpegLocation, '-x', '--audio-format', 'mp3', '--audio-quality', '0', '-o', outputTemplate, '--', sourceUrl],
+        extension: 'mp3',
+        preflight: { command: this.config.ffmpegPath, args: ['-version'] }
+      };
     }
     if (!formatId) throw new AppError('화질을 선택하세요.', 400, 'FORMAT_REQUIRED');
     const selected = formats.find(item => String(item.id) === String(formatId));

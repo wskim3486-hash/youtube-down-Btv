@@ -41,6 +41,10 @@
         <span id="provider" class="provider"></span>
         <h2 id="title"></h2>
         <p id="duration" class="duration"></p>
+        <div class="mode-selector" role="radiogroup" aria-label="다운로드 형식">
+          <button class="mode-button active" type="button" data-mode="video" role="radio" aria-checked="true">MP4 영상</button>
+          <button class="mode-button" type="button" data-mode="audio" role="radio" aria-checked="false">MP3 오디오</button>
+        </div>
         <div class="format-heading"><h3>다운로드 화질</h3><span id="format-count"></span></div>
         <label class="sr-only" for="quality-select">다운로드 화질</label>
         <select id="quality-select" class="quality-select"></select>
