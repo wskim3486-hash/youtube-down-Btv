@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Btv ClipPort · 사내 영상 도구</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/"><span class="brand-mark"><i></i></span>Btv ClipPort</a>
+    <div class="top-actions">
+      <button id="reset-button" class="reset-button" type="button">새 영상</button>
+      <span class="internal"><i></i>Company internal</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <p class="eyebrow">PUBLIC MEDIA, READY TO USE</p>
+      <h1>영상 주소 하나로<br><em>필요한 화질까지.</em></h1>
+      <p class="description">공개 영상 URL을 붙여넣으면 실제 제공 화질을 확인하고 MP4로 다운로드할 수 있습니다.</p>
+      <form id="analyze-form" class="url-form">
+        <label class="sr-only" for="media-url">영상 URL</label>
+        <div class="url-input">
+          <span aria-hidden="true">↗</span>
+          <input id="media-url" type="url" autocomplete="url" placeholder="YouTube 공개 영상 URL을 붙여넣으세요" required>
+          <button id="paste-button" class="paste" type="button">붙여넣기</button>
+        </div>
+        <button id="analyze-button" class="primary" type="submit"><span>영상 분석</span><span>→</span></button>
+      </form>
+      <p class="scope">공개적으로 재생 가능하거나 회사가 이용 권한을 가진 콘텐츠만 사용하세요.</p>
+    </section>
+
+    <section id="status" class="status hidden" aria-live="polite">
+      <span class="spinner" aria-hidden="true"></span>
+      <div><strong id="status-title"></strong><p id="status-message"></p></div>
+    </section>
+
+    <section id="result" class="result hidden" aria-live="polite">
+      <div id="thumbnail-wrap" class="thumbnail-wrap"><img id="thumbnail" alt="영상 썸네일"></div>
+      <div class="result-body">
+        <span id="provider" class="provider"></span>
+        <h2 id="title"></h2>
+        <p id="duration" class="duration"></p>
+        <div class="mode-selector" role="radiogroup" aria-label="다운로드 형식">
+          <button class="mode-button active" type="button" data-mode="video" role="radio" aria-checked="true">MP4 영상</button>
+          <button class="mode-button" type="button" data-mode="audio" role="radio" aria-checked="false">MP3 오디오</button>
+        </div>
+        <div class="format-heading"><h3>다운로드 화질</h3><span id="format-count"></span></div>
+        <label class="sr-only" for="quality-select">다운로드 화질</label>
+        <select id="quality-select" class="quality-select"></select>
+        <p id="format-help" class="format-help"></p>
+        <button id="download-button" class="download-button" type="button" disabled>MP4 다운로드</button>
+        <p id="download-status" class="download-status" aria-live="polite"></p>
+      </div>
+    </section>
+
+    <section class="principles">
+      <article><span>01</span><h3>실제 제공 화질</h3><p>사이트가 제공하지 않는 화질을 인위적으로 만들지 않습니다.</p></article>
+      <article><span>02</span><h3>원본 품질 우선</h3><p>가능하면 재인코딩 없이 원본 영상과 음성을 MP4로 준비합니다.</p></article>
+      <article><span>03</span><h3>권리와 접근 보호</h3><p>DRM, 로그인, 인증 또는 유료 콘텐츠 접근을 우회하지 않습니다.</p></article>
+    </section>
+  </main>
+
+  <dialog id="login-dialog">
+    <form id="login-form">
+      <p class="eyebrow">COMPANY ACCESS</p>
+      <h2>사내 접근 키</h2>
+      <p>승인된 구성원만 사용할 수 있습니다.</p>
+      <label for="access-key">접근 키</label>
+      <input id="access-key" type="password" autocomplete="current-password" required>
+      <p id="login-error" class="login-error" role="alert"></p>
+      <button class="primary login-button" type="submit">접속하기 <span>→</span></button>
+    </form>
+  </dialog>
+
+  <footer><span>Btv ClipPort · 회사 내부 사용 전용</span><small>Built by wskim0131@sk.com</small></footer>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

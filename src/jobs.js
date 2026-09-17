@@ -1,0 +1,137 @@
+import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { run } from './lib/process.js';
+import { AppError } from './lib/errors.js';
+import { normalizeTitle } from './providers/base.js';
+
+export class JobManager {
+  constructor(config) { this.config = config; this.jobs = new Map(); this.running = 0; this.queue = []; }
+
+  async init() {
+    await fs.mkdir(this.config.tempRoot, { recursive: true });
+    setInterval(() => this.cleanup(), 60_000).unref();
+  }
+
+  create(provider, metadata, selection) {
+    const id = crypto.randomUUID();
+    const extension = selection.mode === 'audio' ? 'mp3' : 'mp4';
+    const safeTitle = normalizeTitle(metadata.title);
+    const directory = path.join(this.config.tempRoot, id);
+    const outputPath = path.join(directory, `${safeTitle}.${extension}`);
+    const job = { id, status: 'queued', progress: null, createdAt: Date.now(), provider, metadata, selection, directory, outputPath, filename: `${safeTitle}.${extension}`, error: null };
+    this.jobs.set(id, job);
+    this.queue.push(job);
+    this.drain();
+    return publicJob(job);
+  }
+
+  get(id) { const job = this.jobs.get(id); if (!job) throw new AppError('작업을 찾을 수 없습니다.', 404, 'JOB_NOT_FOUND'); return job; }
+
+  async remove(id) {
+    const job = this.get(id);
+    if (job.status === 'processing') throw new AppError('진행 중인 작업은 정리할 수 없습니다.', 409, 'JOB_PROCESSING');
+    await fs.rm(job.directory, { recursive: true, force: true });
+    this.jobs.delete(id);
+  }
+
+  async drain() {
+    while (this.running < this.config.maxConcurrent && this.queue.length) {
+      const job = this.queue.shift();
+      this.running += 1;
+      this.execute(job).finally(() => { this.running -= 1; this.drain(); });
+    }
+  }
+
+  async execute(job) {
+    try {
+      job.status = 'processing';
+      job.progress = 0;
+      await fs.mkdir(job.directory, { recursive: true });
+      const safeBaseName = path.parse(job.filename).name;
+      const outputTemplate = path.join(job.directory, `${safeBaseName}.%(ext)s`);
+      const spec = job.provider.buildDownload({ ...job.metadata, ...job.selection, outputPath: job.outputPath, outputTemplate });
+      if (spec.preflight) {
+        await run(spec.preflight.command, spec.preflight.args, { timeoutMs: 10_000 });
+      }
+      await run(spec.command, spec.args, {
+        timeoutMs: 30 * 60_000,
+        onStdout: chunk => updateProgress(job, chunk),
+        onStderr: chunk => updateProgress(job, chunk)
+      });
+      if (spec.postprocess) {
+        const files = await fs.readdir(job.directory);
+        const sourceName = files.find(name => name.includes(spec.intermediateMarker) && !/\.f\d+\./i.test(name));
+        if (!sourceName) throw new AppError('호환성 변환용 원본 파일을 찾지 못했습니다.', 500, 'INTERMEDIATE_MISSING');
+        const sourcePath = path.join(job.directory, sourceName);
+        const postprocess = spec.postprocess(sourcePath);
+        await run(postprocess.command, postprocess.args, { timeoutMs: 30 * 60_000 });
+        await fs.rm(sourcePath, { force: true });
+      }
+      if (job.provider.id === 'ytdlp' || job.provider.id === 'generic') {
+        const files = await fs.readdir(job.directory);
+        const expectedName = `${safeBaseName}.${spec.extension}`;
+        const result = files.includes(expectedName)
+          ? expectedName
+          : files.find(name => name.toLowerCase().endsWith(`.${spec.extension}`) && !/\.f\d+\./i.test(name));
+        if (!result) throw new AppError('변환된 파일을 찾지 못했습니다.', 500, 'OUTPUT_MISSING');
+        job.outputPath = path.join(job.directory, result);
+        job.filename = result;
+      }
+      if (job.selection.mode === 'video') await verifyVideoOutput(this.config.ffprobePath, job.outputPath, spec.expectedMedia);
+      job.status = 'ready';
+      job.progress = 100;
+      job.readyAt = Date.now();
+    } catch (error) {
+      job.status = 'failed';
+      job.error = error.message || '다운로드에 실패했습니다.';
+    }
+  }
+
+  async cleanup() {
+    const cutoff = Date.now() - this.config.downloadTtlMs;
+    for (const [id, job] of this.jobs) {
+      if (job.createdAt < cutoff && job.status !== 'processing') {
+        await fs.rm(job.directory, { recursive: true, force: true }).catch(() => {});
+        this.jobs.delete(id);
+      }
+    }
+  }
+}
+
+export function publicJob(job) {
+  return { id: job.id, status: job.status, progress: job.progress, filename: job.status === 'ready' ? job.filename : null, error: job.error };
+}
+
+function updateProgress(job, chunk) {
+  for (const match of String(chunk).matchAll(/PROGRESS:\s*([0-9]+(?:\.[0-9]+)?)%/g)) {
+    job.progress = Math.max(0, Math.min(100, Math.round(Number(match[1]))));
+  }
+}
+
+async function verifyVideoOutput(ffprobePath, outputPath, expectedMedia = null) {
+  const { stdout } = await run(ffprobePath, [
+    '-v', 'error', '-show_entries', 'format=format_name',
+    '-show_entries', 'stream=codec_type,codec_name,profile', '-of', 'json', outputPath
+  ], { timeoutMs: 30_000 });
+  let probe;
+  try { probe = JSON.parse(stdout); } catch {
+    throw new AppError('완성된 MP4 파일을 검사하지 못했습니다.', 500, 'INVALID_MP4_PROBE');
+  }
+  const streams = Array.isArray(probe.streams) ? probe.streams : [];
+  const video = streams.find(stream => stream.codec_type === 'video');
+  const audio = streams.find(stream => stream.codec_type === 'audio');
+  const isMp4 = String(probe.format?.format_name || '').split(',').some(name => name === 'mp4' || name === 'mov');
+  if (!video || !audio || !isMp4) {
+    throw new AppError('완성된 MP4에 영상과 오디오가 모두 포함되지 않았습니다.', 500, 'INVALID_MP4_STREAMS');
+  }
+  if (expectedMedia?.videoCodec && video.codec_name !== expectedMedia.videoCodec) {
+    throw new AppError(`완성된 MP4 영상 코덱이 ${expectedMedia.videoCodec.toUpperCase()}가 아닙니다.`, 500, 'INVALID_VIDEO_CODEC');
+  }
+  if (expectedMedia?.audioCodec && audio.codec_name !== expectedMedia.audioCodec) {
+    throw new AppError(`완성된 MP4 오디오 코덱이 ${expectedMedia.audioCodec.toUpperCase()}가 아닙니다.`, 500, 'INVALID_AUDIO_CODEC');
+  }
+  if (expectedMedia?.audioProfile && String(audio.profile).toUpperCase() !== expectedMedia.audioProfile.toUpperCase()) {
+    throw new AppError(`완성된 MP4 오디오 프로파일이 ${expectedMedia.audioProfile}가 아닙니다.`, 500, 'INVALID_AUDIO_PROFILE');
+  }
+}

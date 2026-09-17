@@ -1,0 +1,29 @@
+appId: com.company.clipport
+productName: Btv ClipPort
+asar: true
+npmRebuild: false
+directories:
+  output: dist
+files:
+  - electron/**/*
+  - public/**/*
+  - src/**/*
+  - package.json
+extraResources:
+  - from: resources/tools
+    to: tools
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: ${productName}-Setup-${version}-${arch}.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+mac:
+  target: dmg
+  category: public.app-category.utilities
+  artifactName: ${productName}-${version}-${arch}.${ext}
