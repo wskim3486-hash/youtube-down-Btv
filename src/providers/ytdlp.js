@@ -3,6 +3,7 @@ import { run } from '../lib/process.js';
 import { AppError } from '../lib/errors.js';
 
 const SOCIAL_HOSTS = /(^|\.)(youtube\.com|youtu\.be|instagram\.com)$/i;
+const INSTAGRAM_HOSTS = /(^|\.)instagram\.com$/i;
 
 export class YtDlpProvider extends MediaProvider {
   constructor(config) { super('ytdlp', 'YouTube / Instagram / 공개 영상'); this.config = config; }
@@ -19,6 +20,7 @@ export class YtDlpProvider extends MediaProvider {
     if (!formats.length) throw new AppError('다운로드 가능한 영상 화질을 찾지 못했습니다.', 422, 'NO_FORMATS');
     return {
       provider: this.id,
+      site: siteName(info, url),
       title: normalizeTitle(info.title),
       thumbnail: info.thumbnail || null,
       duration: info.duration || null,
@@ -28,7 +30,7 @@ export class YtDlpProvider extends MediaProvider {
     };
   }
 
-  buildDownload({ sourceUrl, formatId, mode, outputTemplate, formats = [] }) {
+  buildDownload({ sourceUrl, formatId, mode, outputPath, outputTemplate, formats = [] }) {
     const common = [
       '--no-playlist', '--no-call-home', '--no-part', '--newline',
       '--progress-template', 'download:PROGRESS:%(progress._percent_str)s'
@@ -47,6 +49,17 @@ export class YtDlpProvider extends MediaProvider {
     if (!formatId) throw new AppError('화질을 선택하세요.', 400, 'FORMAT_REQUIRED');
     const selected = formats.find(item => String(item.id) === String(formatId));
     if (!selected) throw new AppError('선택한 화질 정보를 찾을 수 없습니다.', 400, 'FORMAT_NOT_FOUND');
+    if (isInstagramUrl(sourceUrl)) {
+      return buildInstagramDownload({
+        common,
+        selected,
+        sourceUrl,
+        outputPath,
+        outputTemplate,
+        ytdlpPath: this.config.ytdlpPath,
+        ffmpegPath: this.config.ffmpegPath
+      });
+    }
     const needsMerge = !selected.hasAudio || selected.ext !== 'mp4';
     const selection = selected.hasAudio
       ? String(formatId)
@@ -69,6 +82,7 @@ export class YtDlpProvider extends MediaProvider {
 }
 
 export function selectPreferredFormats(sourceFormats) {
+  const preferredAudio = selectPreferredAudio(sourceFormats);
   const candidates = sourceFormats
     .filter(item => item.vcodec && item.vcodec !== 'none' && item.format_id && item.height)
     .map(item => {
@@ -82,6 +96,9 @@ export function selectPreferredFormats(sourceFormats) {
         ext: item.ext || 'mp4',
         filesize: item.filesize || item.filesize_approx || null,
         hasAudio,
+        acodec: hasAudio ? item.acodec : preferredAudio?.acodec || null,
+        audioFormatId: hasAudio ? null : preferredAudio?.id || null,
+        audioCompatible: hasAudio ? isAacLc(item.acodec) : Boolean(preferredAudio?.compatible),
         vcodec: item.vcodec,
         codec: codec.id,
         fps: item.fps || null,
@@ -96,6 +113,98 @@ export function selectPreferredFormats(sourceFormats) {
     if (!current || compareCompatibility(format, current) < 0) byHeight.set(format.height, format);
   }
   return [...byHeight.values()].sort((a, b) => b.height - a.height);
+}
+
+export function siteName(info, url) {
+  const extractor = String(info?.extractor_key || info?.extractor || '').toLowerCase();
+  if (extractor.includes('instagram') || INSTAGRAM_HOSTS.test(url.hostname)) return 'Instagram';
+  if (extractor.includes('youtube') || /(^|\.)(youtube\.com|youtu\.be)$/i.test(url.hostname)) return 'YouTube';
+  return info?.extractor_key || info?.extractor || url.hostname;
+}
+
+function buildInstagramDownload({ common, selected, sourceUrl, outputPath, outputTemplate, ytdlpPath, ffmpegPath }) {
+  const needsMerge = !selected.hasAudio || selected.ext !== 'mp4';
+  const needsVideoTranscode = selected.codec !== 'h264';
+  const needsAudioTranscode = !selected.audioCompatible;
+  const needsCompatibilityTranscode = needsVideoTranscode || needsAudioTranscode;
+  const selection = selected.hasAudio
+    ? String(selected.id)
+    : selected.audioFormatId
+      ? `${selected.id}+${selected.audioFormatId}`
+      : [
+        `${selected.id}+bestaudio[acodec=mp4a.40.2]`,
+        `${selected.id}+bestaudio[ext=m4a]`,
+        `${selected.id}+bestaudio`
+      ].join('/');
+  const needsFfmpeg = needsMerge || needsCompatibilityTranscode;
+  const ffmpegLocation = needsFfmpeg && ffmpegPath !== 'ffmpeg'
+    ? ['--ffmpeg-location', ffmpegPath]
+    : [];
+  const conversion = needsMerge ? ['--merge-output-format', 'mp4'] : [];
+
+  if (!needsCompatibilityTranscode) {
+    return {
+      command: ytdlpPath,
+      args: [...common, '-f', selection, ...ffmpegLocation, ...conversion, '-o', outputTemplate, '--', sourceUrl],
+      extension: 'mp4',
+      preflight: needsFfmpeg ? { command: ffmpegPath, args: ['-version'] } : null,
+      expectedMedia: instagramExpectedMedia()
+    };
+  }
+
+  const intermediateTemplate = outputTemplate.replace(/\.%\(ext\)s$/, '.source.%(ext)s');
+  return {
+    command: ytdlpPath,
+    args: [...common, '-f', selection, ...ffmpegLocation, ...conversion, '-o', intermediateTemplate, '--', sourceUrl],
+    extension: 'mp4',
+    intermediateMarker: '.source.',
+    preflight: { command: ffmpegPath, args: ['-version'] },
+    postprocess: inputPath => ({
+      command: ffmpegPath,
+      args: [
+        '-nostdin', '-y', '-i', inputPath,
+        '-map', '0:v:0', '-map', '0:a:0',
+        ...(needsVideoTranscode
+          ? ['-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'medium', '-crf', '18', '-tag:v', 'avc1']
+          : ['-c:v', 'copy']),
+        ...(needsAudioTranscode
+          ? ['-c:a', 'aac', '-profile:a', 'aac_low', '-b:a', '192k']
+          : ['-c:a', 'copy']),
+        '-movflags', '+faststart', outputPath
+      ]
+    }),
+    expectedMedia: instagramExpectedMedia()
+  };
+}
+
+function selectPreferredAudio(sourceFormats) {
+  return sourceFormats
+    .filter(item => (!item.vcodec || item.vcodec === 'none') && item.acodec && item.acodec !== 'none' && item.format_id)
+    .map(item => ({
+      id: String(item.format_id),
+      acodec: item.acodec,
+      compatible: isAacLc(item.acodec),
+      rank: isAacLc(item.acodec) ? 0 : isAac(item.acodec) ? 1 : 2,
+      bitrate: item.abr || item.tbr || 0
+    }))
+    .sort((left, right) => left.rank - right.rank || right.bitrate - left.bitrate)[0] || null;
+}
+
+function isInstagramUrl(value) {
+  try { return INSTAGRAM_HOSTS.test(new URL(value).hostname); }
+  catch { return false; }
+}
+
+function isAac(value) {
+  return /^(aac|mp4a)/i.test(String(value || ''));
+}
+
+function isAacLc(value) {
+  return /^(aac|mp4a\.40\.2)(?:$|\.)/i.test(String(value || ''));
+}
+
+function instagramExpectedMedia() {
+  return { videoCodec: 'h264', audioCodec: 'aac', audioProfile: 'LC' };
 }
 
 function compareCompatibility(left, right) {

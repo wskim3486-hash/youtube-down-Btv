@@ -28,6 +28,11 @@ app.on('second-instance', () => {
 });
 
 app.whenReady().then(startDesktopApp).catch(error => {
+  if (isSmokeTest()) {
+    console.error(error);
+    app.exit(1);
+    return;
+  }
   dialog.showErrorBox('Btv ClipPort 시작 오류', error.message || String(error));
   app.quit();
 });
@@ -190,6 +195,7 @@ async function runSmokeTest() {
       await waitFor(() => !document.querySelector('#result').classList.contains('hidden'));
       const qualityLabels = [...document.querySelector('#quality-select').options].map(option => option.textContent.split(' · ')[0]);
       const analyzed = {
+        site: document.querySelector('#provider').textContent,
         title: document.querySelector('#title').textContent,
         duration: document.querySelector('#duration').textContent,
         formats: document.querySelector('#quality-select').options.length,
@@ -198,9 +204,17 @@ async function runSmokeTest() {
         brand: document.querySelector('.brand').textContent.trim(),
         creator: document.querySelector('footer small').textContent.trim()
       };
+      if (analyzed.site !== 'YouTube') throw new Error('YouTube source label mismatch');
       const mergeOption = [...document.querySelector('#quality-select').options].find(option => option.dataset.requiresFfmpeg === 'true');
       if (!mergeOption) throw new Error('FFmpeg merge format not found');
       document.querySelector('#quality-select').value = mergeOption.value;
+      const progressSamples = [];
+      const downloadStatus = document.querySelector('#download-status');
+      const progressObserver = new MutationObserver(() => {
+        const match = downloadStatus.textContent.match(/\\b\\d+%/);
+        if (match && !progressSamples.includes(match[0])) progressSamples.push(match[0]);
+      });
+      progressObserver.observe(downloadStatus, { childList: true, characterData: true, subtree: true });
       let resetWarning = '';
       const originalAlert = window.alert;
       window.alert = message => { resetWarning = String(message); };
@@ -212,6 +226,8 @@ async function runSmokeTest() {
       window.alert = originalAlert;
       await waitFor(() => document.querySelector('#download-status').textContent.includes('저장했습니다.'), 300000);
       const videoStatus = document.querySelector('#download-status').textContent;
+      progressObserver.disconnect();
+      if (!progressSamples.length) throw new Error('Download progress percentage was not displayed');
       document.querySelector('[data-mode="audio"]').click();
       document.querySelector('#download-button').click();
       await waitFor(() => document.querySelector('#download-status').textContent !== videoStatus);
@@ -272,6 +288,7 @@ async function runSmokeTest() {
         ...analyzed,
         videoStatus,
         audioStatus,
+        progressSamples,
         resetBlockedDuringDownload,
         av1,
         vp9,

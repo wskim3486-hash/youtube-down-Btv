@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { YtDlpProvider, selectPreferredFormats } from '../src/providers/ytdlp.js';
+import { YtDlpProvider, selectPreferredFormats, siteName } from '../src/providers/ytdlp.js';
 
 const provider = new YtDlpProvider({ ytdlpPath: 'yt-dlp', ffmpegPath: 'ffmpeg' });
 
@@ -58,4 +58,79 @@ test('MP3 추출은 FFmpeg 사전검사와 최고 품질 VBR 변환을 요청한
   assert.equal(spec.args.includes('--progress-template'), true);
   assert.equal(spec.args[spec.args.indexOf('--audio-format') + 1], 'mp3');
   assert.equal(spec.args[spec.args.indexOf('--audio-quality') + 1], '0');
+});
+
+test('Instagram VP9와 HE-AAC는 H.264와 AAC-LC로 변환한다', () => {
+  const spec = provider.buildDownload({
+    sourceUrl: 'https://www.instagram.com/reel/example/',
+    formatId: 'dash-vp9',
+    mode: 'video',
+    outputPath: 'video.mp4',
+    outputTemplate: 'video.%(ext)s',
+    formats: [{
+      id: 'dash-vp9', ext: 'mp4', hasAudio: true, codec: 'vp9',
+      acodec: 'mp4a.40.5', audioCompatible: false
+    }]
+  });
+  assert.equal(spec.args[spec.args.indexOf('-f') + 1], 'dash-vp9');
+  assert.equal(spec.args.includes('video.source.%(ext)s'), true);
+  const postprocess = spec.postprocess('video.source.mp4');
+  assert.equal(postprocess.args[postprocess.args.indexOf('-c:v') + 1], 'libx264');
+  assert.equal(postprocess.args[postprocess.args.indexOf('-c:a') + 1], 'aac');
+  assert.deepEqual(spec.expectedMedia, { videoCodec: 'h264', audioCodec: 'aac', audioProfile: 'LC' });
+});
+
+test('Instagram H.264와 AAC-LC MP4는 재인코딩하지 않는다', () => {
+  const spec = provider.buildDownload({
+    sourceUrl: 'https://www.instagram.com/reel/example/',
+    formatId: 'compatible',
+    mode: 'video',
+    outputPath: 'video.mp4',
+    outputTemplate: 'video.%(ext)s',
+    formats: [{
+      id: 'compatible', ext: 'mp4', hasAudio: true, codec: 'h264',
+      acodec: 'mp4a.40.2', audioCompatible: true
+    }]
+  });
+  assert.equal(spec.postprocess, undefined);
+  assert.equal(spec.args[spec.args.indexOf('-f') + 1], 'compatible');
+});
+
+test('Instagram H.264와 HE-AAC는 영상은 복사하고 오디오만 AAC-LC로 변환한다', () => {
+  const spec = provider.buildDownload({
+    sourceUrl: 'https://www.instagram.com/reel/example/',
+    formatId: 'h264-he-aac',
+    mode: 'video',
+    outputPath: 'video.mp4',
+    outputTemplate: 'video.%(ext)s',
+    formats: [{
+      id: 'h264-he-aac', ext: 'mp4', hasAudio: true, codec: 'h264',
+      acodec: 'mp4a.40.5', audioCompatible: false
+    }]
+  });
+  const postprocess = spec.postprocess('video.source.mp4');
+  assert.equal(postprocess.args[postprocess.args.indexOf('-c:v') + 1], 'copy');
+  assert.equal(postprocess.args[postprocess.args.indexOf('-c:a') + 1], 'aac');
+});
+
+test('Instagram VP9와 AAC-LC는 오디오는 복사하고 영상만 H.264로 변환한다', () => {
+  const spec = provider.buildDownload({
+    sourceUrl: 'https://www.instagram.com/reel/example/',
+    formatId: 'vp9-aac-lc',
+    mode: 'video',
+    outputPath: 'video.mp4',
+    outputTemplate: 'video.%(ext)s',
+    formats: [{
+      id: 'vp9-aac-lc', ext: 'mp4', hasAudio: true, codec: 'vp9',
+      acodec: 'mp4a.40.2', audioCompatible: true
+    }]
+  });
+  const postprocess = spec.postprocess('video.source.mp4');
+  assert.equal(postprocess.args[postprocess.args.indexOf('-c:v') + 1], 'libx264');
+  assert.equal(postprocess.args[postprocess.args.indexOf('-c:a') + 1], 'copy');
+});
+
+test('분석 출처 이름은 실제 URL과 extractor에서 결정한다', () => {
+  assert.equal(siteName({ extractor_key: 'Youtube' }, new URL('https://youtu.be/example')), 'YouTube');
+  assert.equal(siteName({ extractor_key: 'Instagram' }, new URL('https://www.instagram.com/reel/example/')), 'Instagram');
 });

@@ -110,12 +110,13 @@ downloadButton.addEventListener('click', async () => {
 
 async function waitForDownload(jobId, desktopSavePath = null, requestedMode = outputMode) {
   for (;;) {
-    await delay(1000);
+    await delay(250);
     const job = await request(`/api/downloads/${jobId}`);
     if (job.status === 'failed') throw new Error(job.error || '영상 다운로드에 실패했습니다.');
     if (job.status === 'ready') {
       const extension = requestedMode === 'audio' ? 'MP3' : 'MP4';
       if (window.clipPortDesktop?.isDesktop && desktopSavePath) {
+        setDownloadState(true, `${extension} 준비 100% · 선택한 위치에 저장하고 있습니다.`, false, requestedMode);
         await window.clipPortDesktop.saveDownload({ jobId, filePath: desktopSavePath });
         setDownloadState(false, `${extension} 파일을 선택한 위치에 저장했습니다.`, false, requestedMode);
       } else {
@@ -148,7 +149,7 @@ async function request(url, options = {}) {
 function renderResult(media) {
   status.classList.add('hidden');
   result.classList.remove('hidden');
-  document.querySelector('#provider').textContent = 'YouTube';
+  document.querySelector('#provider').textContent = media.site || media.provider || '';
   document.querySelector('#title').textContent = media.title || '제목 없음';
   document.querySelector('#duration').textContent = media.duration ? formatDuration(media.duration) : '영상 길이 정보 없음';
   const thumbnailWrap = document.querySelector('#thumbnail-wrap');

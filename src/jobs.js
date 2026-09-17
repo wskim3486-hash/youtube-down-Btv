@@ -59,6 +59,15 @@ export class JobManager {
         onStdout: chunk => updateProgress(job, chunk),
         onStderr: chunk => updateProgress(job, chunk)
       });
+      if (spec.postprocess) {
+        const files = await fs.readdir(job.directory);
+        const sourceName = files.find(name => name.includes(spec.intermediateMarker) && !/\.f\d+\./i.test(name));
+        if (!sourceName) throw new AppError('호환성 변환용 원본 파일을 찾지 못했습니다.', 500, 'INTERMEDIATE_MISSING');
+        const sourcePath = path.join(job.directory, sourceName);
+        const postprocess = spec.postprocess(sourcePath);
+        await run(postprocess.command, postprocess.args, { timeoutMs: 30 * 60_000 });
+        await fs.rm(sourcePath, { force: true });
+      }
       if (job.provider.id === 'ytdlp' || job.provider.id === 'generic') {
         const files = await fs.readdir(job.directory);
         const expectedName = `${safeBaseName}.${spec.extension}`;
@@ -69,7 +78,7 @@ export class JobManager {
         job.outputPath = path.join(job.directory, result);
         job.filename = result;
       }
-      if (job.selection.mode === 'video') await verifyVideoOutput(this.config.ffprobePath, job.outputPath);
+      if (job.selection.mode === 'video') await verifyVideoOutput(this.config.ffprobePath, job.outputPath, spec.expectedMedia);
       job.status = 'ready';
       job.progress = 100;
       job.readyAt = Date.now();
@@ -100,20 +109,29 @@ function updateProgress(job, chunk) {
   }
 }
 
-async function verifyVideoOutput(ffprobePath, outputPath) {
+async function verifyVideoOutput(ffprobePath, outputPath, expectedMedia = null) {
   const { stdout } = await run(ffprobePath, [
     '-v', 'error', '-show_entries', 'format=format_name',
-    '-show_entries', 'stream=codec_type,codec_name', '-of', 'json', outputPath
+    '-show_entries', 'stream=codec_type,codec_name,profile', '-of', 'json', outputPath
   ], { timeoutMs: 30_000 });
   let probe;
   try { probe = JSON.parse(stdout); } catch {
     throw new AppError('완성된 MP4 파일을 검사하지 못했습니다.', 500, 'INVALID_MP4_PROBE');
   }
   const streams = Array.isArray(probe.streams) ? probe.streams : [];
-  const hasVideo = streams.some(stream => stream.codec_type === 'video');
-  const hasAudio = streams.some(stream => stream.codec_type === 'audio');
+  const video = streams.find(stream => stream.codec_type === 'video');
+  const audio = streams.find(stream => stream.codec_type === 'audio');
   const isMp4 = String(probe.format?.format_name || '').split(',').some(name => name === 'mp4' || name === 'mov');
-  if (!hasVideo || !hasAudio || !isMp4) {
+  if (!video || !audio || !isMp4) {
     throw new AppError('완성된 MP4에 영상과 오디오가 모두 포함되지 않았습니다.', 500, 'INVALID_MP4_STREAMS');
+  }
+  if (expectedMedia?.videoCodec && video.codec_name !== expectedMedia.videoCodec) {
+    throw new AppError(`완성된 MP4 영상 코덱이 ${expectedMedia.videoCodec.toUpperCase()}가 아닙니다.`, 500, 'INVALID_VIDEO_CODEC');
+  }
+  if (expectedMedia?.audioCodec && audio.codec_name !== expectedMedia.audioCodec) {
+    throw new AppError(`완성된 MP4 오디오 코덱이 ${expectedMedia.audioCodec.toUpperCase()}가 아닙니다.`, 500, 'INVALID_AUDIO_CODEC');
+  }
+  if (expectedMedia?.audioProfile && String(audio.profile).toUpperCase() !== expectedMedia.audioProfile.toUpperCase()) {
+    throw new AppError(`완성된 MP4 오디오 프로파일이 ${expectedMedia.audioProfile}가 아닙니다.`, 500, 'INVALID_AUDIO_PROFILE');
   }
 }

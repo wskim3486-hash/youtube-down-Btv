@@ -15,7 +15,7 @@
     "desktop": "npm run tools:prepare && node scripts/run-electron.mjs",
     "desktop:smoke": "npm run tools:prepare && node scripts/run-electron.mjs --smoke-test",
     "dist:win": "npm run tools:prepare && electron-builder --win nsis",
-    "dist:mac": "npm run tools:prepare && electron-builder --mac"
+    "dist:mac": "npm run tools:prepare && node scripts/build-mac.mjs"
   },
   "engines": {
     "node": ">=20"
